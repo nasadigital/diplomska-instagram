@@ -60,14 +60,13 @@ def document_generator(filepath):
         next(csv_read, None)
         for row in csv_read:
             if len(row) == 7:
-                yield gensim.utils.simple_preprocess(
-                        ' '.join(row[3].split(',')))
+                yield row[3].split(',')
 
 def generate_embeddings(filepath, save_path, dimension=64,
                         min_app=3, threads=10, no_epochs=10):
     documents = list(document_generator(filepath))
     print("Loaded documents!")
-    model = gensim.models.Word2Vec(documents, size=dimension, window=10,
+    model = gensim.models.Word2Vec(documents, size=dimension, window=100,
             min_count=min_app, workers=threads)
     print("Start training...")
     model.train(documents, total_examples=len(documents), epochs=no_epochs)
