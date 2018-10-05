@@ -73,6 +73,12 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Github
+*.py.swp
+
+# Gensim
+*.model
+
 # IPython
 profile_default/
 ipython_config.py
