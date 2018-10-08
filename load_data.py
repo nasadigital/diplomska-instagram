@@ -63,11 +63,11 @@ def document_generator(filepath):
                 yield row[3].split(',')
 
 def generate_embeddings(filepath, save_path, dimension=64,
-                        min_app=3, threads=10, no_epochs=10):
+                        min_app=3, threads=10, no_epochs=10, skipgram=1):
     documents = list(document_generator(filepath))
     print("Loaded documents!")
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
-            min_count=min_app, workers=threads)
+            min_count=min_app, workers=threads, sg=skipgram)
     print("Start training...")
     model.train(documents, total_examples=len(documents), epochs=no_epochs)
     print("Finished training!\nSaving...")
