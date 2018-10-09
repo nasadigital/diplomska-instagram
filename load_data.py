@@ -1,4 +1,5 @@
 import csv
+import time
 import gensim
 
 class UserLink(object):
@@ -54,21 +55,30 @@ def load_media(filepath):
             media[int(row[1])].append(Media(row, hashtags))
     return media, hashtags
 
-def document_generator(filepath):
-    with open(filepath, encoding='ISO-8859-1') as media_file:
-        csv_read = csv.reader(media_file, delimiter=';')
-        next(csv_read, None)
-        for row in csv_read:
-            if len(row) == 7:
-                yield row[3].split(',')
+class DocumentIterator:
+    def __init__(self, filepath):
+        self.filepath = filepath
+
+    def __iter__(self):
+        with open(self.filepath, encoding='ISO-8859-1') as media_file:
+            csv_read = csv.reader(media_file, delimiter=';')
+            next(csv_read, None)
+            for row in csv_read:
+                if len(row) == 7:
+                    yield row[3].split(',')
 
 def generate_embeddings(filepath, save_path, dimension=64,
                         min_app=3, threads=10, no_epochs=10, skipgram=1):
-    documents = list(document_generator(filepath))
+    start_time = time.time()
+    documents = list(DocumentIterator(filepath))
     print("Loaded documents!")
+    print(time.time() - start_time)
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
             min_count=min_app, workers=threads, sg=skipgram)
     print("Start training...")
-    model.train(documents, total_examples=len(documents), epochs=no_epochs)
+    print(time.time() - start_time)
+    model.train(documents, total_examples=len(documents),
+                epochs=no_epochs)
     print("Finished training!\nSaving...")
+    print(time.time() - start_time)
     model.save(save_path)
