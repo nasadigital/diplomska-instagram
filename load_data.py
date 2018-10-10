@@ -58,21 +58,36 @@ def load_media(filepath):
     return media, hashtags
 
 class DocumentIterator:
-    def __init__(self, filepath):
+    def __init__(self, filepath, dist_path="", cur_set=-1):
         self.filepath = filepath
+        self.dist_path = dist_path
+        self.cur_set = cur_set
 
     def __iter__(self):
         with open(self.filepath, encoding='ISO-8859-1') as media_file:
             csv_read = csv.reader(media_file, delimiter=';')
             next(csv_read, None)
+            dist = None
+            if (self.dist_path):
+                dist = open(self.dist_path, 'rb')
             for row in csv_read:
                 if len(row) == 7:
-                    yield row[3].split(',')
+                    if dist:
+                        filtered = list(map(lambda x: x[1], filter(
+                            lambda x: x[0] != self.cur_set,
+                            zip(pickle.load(dist), row[3].split(',')))))
+                        if not filtered:
+                            continue
+                        yield filtered
+                    else:
+                        yield row[3].split(',')
 
 def generate_embeddings(filepath, save_path, dimension=64,
-                        min_app=3, threads=10, no_epochs=10, skipgram=1):
+                        min_app=3, threads=1, no_epochs=10, skipgram=1,
+                        dist_path='', cur_set=-1):
     start_time = time.time()
-    documents = list(DocumentIterator(filepath))
+    documents = list(DocumentIterator(filepath, dist_path=dist_path,
+                                      cur_set=cur_set))
     print("Loaded documents!")
     print(time.time() - start_time)
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
