@@ -78,6 +78,7 @@ target/
 
 # Gensim
 *.model
+*.dat
 
 # IPython
 profile_default/

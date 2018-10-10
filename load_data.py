@@ -88,12 +88,8 @@ def generate_embeddings(filepath, save_path, dimension=64,
     start_time = time.time()
     documents = list(DocumentIterator(filepath, dist_path=dist_path,
                                       cur_set=cur_set))
-    print('Loaded documents!')
-    print(time.time() - start_time)
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
             min_count=min_app, workers=threads, sg=skipgram)
-    print('Start training...')
-    print(time.time() - start_time)
     model.train(documents, total_examples=len(documents),
                 epochs=no_epochs)
     print('Finished training!\nSaving...')
@@ -124,3 +120,20 @@ def eval_predictions(filepath, dist_path, model_path, cur_set):
                         except:
                             found[10] += 1
     return found
+
+def train_test_pipeline(filepath, dist_path, model_path, n):
+    print('Generating split...')
+    split_nway(filepath, dist_path, n)
+    print('Generated split.\nTraining models...')
+    for i in range(n):
+        generate_embeddings(filepath, '%s%03d-%03d.model' % (model_path, i, n),
+                dist_path=dist_path, cur_set=i)
+        print('Finished training model no. %d' % i)
+    print('Finished training all models.\nEvaluating models...')
+    results = []
+    for i in range(n):
+        results.append(eval_predictions(
+            filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i))
+        print('Finished testing model no. %d' % i)
+    print('Finished testing models.')
+    return results
