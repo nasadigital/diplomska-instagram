@@ -13,7 +13,7 @@ class UserLink(object):
         ] if row[4] else []
 
     def __repr__(self):
-        return "%d %d %d" % (self.to, self.likes, len(self.comments))
+        return '%d %d %d' % (self.to, self.likes, len(self.comments))
 
 class Media(object):
     def __init__(self, row, hashtags):
@@ -32,7 +32,7 @@ class Media(object):
             self.tags = []
 
     def __repr__(self):
-        return "%d %d %d %d %d" % (self.id, self.timestamp, self.likes,
+        return '%d %d %d %d %d' % (self.id, self.timestamp, self.likes,
                                    self.comments, len(self.tags)) 
 def load_users(filepath):
     graph = {}
@@ -58,7 +58,7 @@ def load_media(filepath):
     return media, hashtags
 
 class DocumentIterator:
-    def __init__(self, filepath, dist_path="", cur_set=-1):
+    def __init__(self, filepath, dist_path='', cur_set=-1):
         self.filepath = filepath
         self.dist_path = dist_path
         self.cur_set = cur_set
@@ -88,15 +88,15 @@ def generate_embeddings(filepath, save_path, dimension=64,
     start_time = time.time()
     documents = list(DocumentIterator(filepath, dist_path=dist_path,
                                       cur_set=cur_set))
-    print("Loaded documents!")
+    print('Loaded documents!')
     print(time.time() - start_time)
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
             min_count=min_app, workers=threads, sg=skipgram)
-    print("Start training...")
+    print('Start training...')
     print(time.time() - start_time)
     model.train(documents, total_examples=len(documents),
                 epochs=no_epochs)
-    print("Finished training!\nSaving...")
+    print('Finished training!\nSaving...')
     print(time.time() - start_time)
     model.save(save_path)
 
@@ -105,3 +105,22 @@ def split_nway(filepath, save_path, n=10):
         documents = DocumentIterator(filepath)
         for entry in documents:
             pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
+
+def eval_predictions(filepath, dist_path, model_path, cur_set):
+    found = [0] * 11
+    documents = DocumentIterator(filepath)
+    model = gensim.models.Word2Vec.load(model_path)
+    with open(dist_path, 'rb') as dist:
+        for entry in documents:
+            filtered_entry = list(filter(lambda x: x in model.wv.vocab, entry))
+            for inst in zip(pickle.load(dist), entry):
+                if inst[0] == cur_set and inst[1] in filtered_entry:
+                    pos = list(filter(lambda x: x is not inst[1], filtered_entry))
+                    if pos:
+                        try:
+                            found[[
+                                _[0] for _ in model.wv.most_similar(positive=pos)
+                            ].index(inst[1])] += 1
+                        except:
+                            found[10] += 1
+    return found
