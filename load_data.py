@@ -1,6 +1,8 @@
 import csv
-import time
 import gensim
+import time
+import pickle
+import random
 
 class UserLink(object):
     def __init__(self, row):
@@ -82,3 +84,9 @@ def generate_embeddings(filepath, save_path, dimension=64,
     print("Finished training!\nSaving...")
     print(time.time() - start_time)
     model.save(save_path)
+
+def split_nway(filepath, save_path, n=10):
+    with open(save_path, 'wb+') as split_file:
+        documents = DocumentIterator(filepath)
+        for entry in documents:
+            pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
