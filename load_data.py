@@ -1,5 +1,6 @@
 import csv
 import gensim
+from itertools import accumulate
 import time
 import pickle
 import random
@@ -103,6 +104,9 @@ def split_nway(filepath, save_path, n=10):
             pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
 
 def eval_predictions(filepath, dist_path, model_path, cur_set):
+    # most_common = [('instagood', 0), ('photooftheday', 0), ('vscocam', 0),
+    #         ('instagramhub', 0), ('iphoneonly', 0), ('instamood', 0),
+    #         ('jj', 0), ('iphonesia', 0), ('igers', 0), ('picoftheday', 0)]
     found = [0] * 11
     documents = DocumentIterator(filepath)
     model = gensim.models.Word2Vec.load(model_path)
@@ -121,19 +125,38 @@ def eval_predictions(filepath, dist_path, model_path, cur_set):
                             found[10] += 1
     return found
 
-def train_test_pipeline(filepath, dist_path, model_path, n):
-    print('Generating split...')
-    split_nway(filepath, dist_path, n)
+def print_results(results):
+    cum_res = [0] * 11
+    for res in results:
+        print(str(res))
+        print(str(list(accumulate(res))))
+        print(str(['%.4f' % (i / sum(res)) for i in list(accumulate(res))]))
+        for pair in zip(range(11), list(accumulate(res))):
+            cum_res[pair[0]] += pair[1] / sum(res)
+    print(str(['%.4f' % (i / len(results)) for i in cum_res]))
+
+def train_test_pipeline(filepath, dist_path, model_path, n, dim=64, epochs=10,
+        result_path='./results.txt', split_data=False, check=1, sg=1):
+    if split_data:
+        print('Generating split...')
+        split_nway(filepath, dist_path, n)
     print('Generated split.\nTraining models...')
-    for i in range(n):
+    for i in range(check):
         generate_embeddings(filepath, '%s%03d-%03d.model' % (model_path, i, n),
-                dist_path=dist_path, cur_set=i)
+                dist_path=dist_path, cur_set=i, dimension=dim, no_epochs=epochs,
+                skipgram=sg)
         print('Finished training model no. %d' % i)
     print('Finished training all models.\nEvaluating models...')
     results = []
-    for i in range(n):
+    for i in range(check):
         results.append(eval_predictions(
             filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i))
         print('Finished testing model no. %d' % i)
     print('Finished testing models.')
-    return results
+    with open(result_path, 'w+') as res_file:
+        res_file.write(str(results))
+    print_results(results)
+
+def get_hashtags(post_content, model):
+    return [i[1:] for i in post_content.split(' ') if
+            i.startswith('#') and i[1:] in model.wv.vocab]
