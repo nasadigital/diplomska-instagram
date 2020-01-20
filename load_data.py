@@ -35,6 +35,7 @@ class Media(object):
     def __repr__(self):
         return '%d %d %d %d %d' % (self.id, self.timestamp, self.likes,
                                    self.comments, len(self.tags)) 
+
 def load_users(filepath):
     graph = {}
     with open(filepath) as users_file:
@@ -83,16 +84,30 @@ class DocumentIterator:
                     else:
                         yield row[3].split(',')
 
+class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
+    def __init__(self):
+        self.epoch = 0
+
+    def on_epoch_begin(self, model):
+        print("Epoch #{} start".format(self.epoch))
+
+    def on_epoch_end(self, model):
+        print("Epoch #{} end".format(self.epoch))
+        self.epoch += 1
+
 def generate_embeddings(filepath, save_path, dimension=64,
                         min_app=3, threads=1, no_epochs=10, skipgram=1,
                         dist_path='', cur_set=-1):
     start_time = time.time()
+    epoch_logger = EpochLogger()
     documents = list(DocumentIterator(filepath, dist_path=dist_path,
                                       cur_set=cur_set))
+    print("Docs loaded.")
     model = gensim.models.Word2Vec(documents, size=dimension, window=100,
             min_count=min_app, workers=threads, sg=skipgram)
+    print("Model initialized.")
     model.train(documents, total_examples=len(documents),
-                epochs=no_epochs)
+                epochs=no_epochs, callbacks=[epoch_logger])
     print('Finished training!\nSaving...')
     print(time.time() - start_time)
     model.save(save_path)
@@ -104,9 +119,6 @@ def split_nway(filepath, save_path, n=10):
             pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
 
 def eval_predictions(filepath, dist_path, model_path, cur_set):
-    # most_common = [('instagood', 0), ('photooftheday', 0), ('vscocam', 0),
-    #         ('instagramhub', 0), ('iphoneonly', 0), ('instamood', 0),
-    #         ('jj', 0), ('iphonesia', 0), ('igers', 0), ('picoftheday', 0)]
     found = [0] * 11
     documents = DocumentIterator(filepath)
     model = gensim.models.Word2Vec.load(model_path)
