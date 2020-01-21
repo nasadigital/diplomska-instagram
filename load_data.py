@@ -96,7 +96,7 @@ class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
         self.epoch += 1
 
 def generate_embeddings(filepath, save_path, dimension=64,
-                        min_app=3, threads=1, no_epochs=10, skipgram=1,
+                        min_app=3, threads=2, no_epochs=10, skipgram=1,
                         dist_path='', cur_set=-1):
     start_time = time.time()
     epoch_logger = EpochLogger()
@@ -137,15 +137,17 @@ def eval_predictions(filepath, dist_path, model_path, cur_set):
                             found[10] += 1
     return found
 
-def print_results(results):
+def format_results(results):
+    lines = []
     cum_res = [0] * 11
     for res in results:
-        print(str(res))
-        print(str(list(accumulate(res))))
-        print(str(['%.4f' % (i / sum(res)) for i in list(accumulate(res))]))
+        lines.append(str(res))
+        lines.append(str(list(accumulate(res))))
+        lines.append(str(['%.4f' % (i / sum(res)) for i in list(accumulate(res))]))
         for pair in zip(range(11), list(accumulate(res))):
             cum_res[pair[0]] += pair[1] / sum(res)
-    print(str(['%.4f' % (i / len(results)) for i in cum_res]))
+    lines.append(str(['%.4f' % (i / len(results)) for i in cum_res]))
+    return '\n'.join(lines)
 
 def train_test_pipeline(filepath, dist_path, model_path, n, dim=64, epochs=10,
         result_path='./results.txt', split_data=False, check=1, sg=1):
@@ -167,7 +169,10 @@ def train_test_pipeline(filepath, dist_path, model_path, n, dim=64, epochs=10,
     print('Finished testing models.')
     with open(result_path, 'w+') as res_file:
         res_file.write(str(results))
-    print_results(results)
+    formated_results = format_results(results)
+    print(formated_results)
+    with open(result_path + 'f', 'w+') as res_file:
+        res_file.write(formated_results)
 
 def get_hashtags(post_content, model):
     return [i[1:] for i in post_content.split(' ') if
