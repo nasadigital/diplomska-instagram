@@ -95,22 +95,14 @@ class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
         print("Epoch #{} end".format(self.epoch))
         self.epoch += 1
 
-def generate_embeddings(filepath, save_path, dimension=64,
-                        min_app=3, threads=2, no_epochs=10, skipgram=1,
-                        dist_path='', cur_set=-1):
+def generate_embeddings(filepath, save_path, train_model, dist_path='',
+                        cur_set=-1):
     start_time = time.time()
-    epoch_logger = EpochLogger()
     documents = list(DocumentIterator(filepath, dist_path=dist_path,
                                       cur_set=cur_set))
     print("Docs loaded.")
-    model = gensim.models.Word2Vec(documents, size=dimension, window=100,
-            min_count=min_app, workers=threads, sg=skipgram)
-    print("Model initialized.")
-    model.train(documents, total_examples=len(documents),
-                epochs=no_epochs, callbacks=[epoch_logger])
-    print('Finished training!\nSaving...')
+    train_model(documents, save_path)
     print(time.time() - start_time)
-    model.save(save_path)
 
 def split_nway(filepath, save_path, n=10):
     with open(save_path, 'wb+') as split_file:
@@ -143,22 +135,22 @@ def format_results(results):
     for res in results:
         lines.append(str(res))
         lines.append(str(list(accumulate(res))))
-        lines.append(str(['%.4f' % (i / sum(res)) for i in list(accumulate(res))]))
+        lines.append(
+                str(['%.4f' % (i / sum(res)) for i in list(accumulate(res))]))
         for pair in zip(range(11), list(accumulate(res))):
             cum_res[pair[0]] += pair[1] / sum(res)
     lines.append(str(['%.4f' % (i / len(results)) for i in cum_res]))
     return '\n'.join(lines)
 
-def train_test_pipeline(filepath, dist_path, model_path, n, dim=64, epochs=10,
-        result_path='./results.txt', split_data=False, check=1, sg=1):
+def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
+        result_path='./results.txt', split_data=False, check=1):
     if split_data:
         print('Generating split...')
         split_nway(filepath, dist_path, n)
     print('Generated split.\nTraining models...')
     for i in range(check):
         generate_embeddings(filepath, '%s%03d-%03d.model' % (model_path, i, n),
-                dist_path=dist_path, cur_set=i, dimension=dim, no_epochs=epochs,
-                skipgram=sg)
+                train_model, dist_path=dist_path, cur_set=i)
         print('Finished training model no. %d' % i)
     print('Finished training all models.\nEvaluating models...')
     results = []
@@ -173,6 +165,23 @@ def train_test_pipeline(filepath, dist_path, model_path, n, dim=64, epochs=10,
     print(formated_results)
     with open(result_path + 'f', 'w+') as res_file:
         res_file.write(formated_results)
+
+def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10,
+        result_path='./results.txt', split_data=False, check=1, sg=1):
+
+    def train_hashtag2vec(documents, save_path):
+        epoch_logger = EpochLogger()
+        model = gensim.models.Word2Vec(documents, size=dim, window=100,
+                min_count=3, workers=2, sg=sg)
+        print("Model initialized.")
+        model.train(documents, total_examples=len(documents),
+                    epochs=epochs, callbacks=[epoch_logger])
+        print('Finished training!\nSaving...')
+        model.save(save_path)
+
+    train_test_pipeline(filepath, dist_path, model_path, n, train_hashtag2vec,
+                        result_path=result_path, split_data=split_data,
+                        check=check)
 
 def get_hashtags(post_content, model):
     return [i[1:] for i in post_content.split(' ') if
