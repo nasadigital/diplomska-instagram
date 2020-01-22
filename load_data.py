@@ -1,9 +1,12 @@
 import csv
 import gensim
 from itertools import accumulate
-import time
+import numpy as np
 import pickle
 import random
+import tensorflow as tf
+import tensorflow_hub as hub
+import time
 
 class UserLink(object):
     def __init__(self, row):
@@ -91,7 +94,7 @@ def generate_embeddings(filepath, save_path, train_model, dist_path='',
                                       cur_set=cur_set))
     print("Docs loaded.")
     train_model(documents, save_path)
-    print(time.time() - start_time)
+    print("Training took: {0}".format(time.time() - start_time))
 
 def split_nway(filepath, save_path, n=10):
     with open(save_path, 'wb+') as split_file:
@@ -185,6 +188,33 @@ def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10
     train_test_pipeline(filepath, dist_path, model_path, n, train_hashtag2vec,
                         eval_hashtag2vec, result_path=result_path,
                         split_data=split_data, check=check)
+
+def train_test_universal_encoder(filepath, dist_path, model_path, n,
+        result_path='.results.txt', split_data=False, check=1):
+    tf.compat.v1.enable_eager_execution()
+    module_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
+    ue_model = hub.load(module_url)
+
+    def setup_universal_encoder(documents, save_path):
+        model = gensim.models.Word2Vec(documents, size=512, window=100,
+                min_count=3, workers=2, sg=1)
+        print("Model initialized.")
+        for word in model.wv.vocab:
+            model.wv[word] = ue_model([word]).numpy()[0]
+        print("Vectors calculated.")
+        model.save(save_path)
+
+    def eval_universal_encoder(sample, output, model, res):
+        try:
+            res[[
+                _[0] for _ in model.wv.similar_by_vector(ue_model([' '.join(sample)]).numpy()[0])
+            ].index(output)] += 1
+        except:
+            res[10] += 1
+
+    train_test_pipeline(filepath, dist_path, model_path, n,
+            setup_universal_encoder, eval_universal_encoder,
+            result_path=result_path, split_data=split_data, check=check)
 
 def get_hashtags(post_content, model):
     return [i[1:] for i in post_content.split(' ') if
