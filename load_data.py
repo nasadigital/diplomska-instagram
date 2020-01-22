@@ -102,18 +102,24 @@ def split_nway(filepath, save_path, n=10):
         for entry in documents:
             pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
 
-def eval_predictions(filepath, dist_path, model_path, cur_set, eval_model):
+def eval_predictions(filepath, dist_path, model_path, cur_set, load_model,
+        eval_model):
     found = [0] * 11
     documents = DocumentIterator(filepath)
-    model = gensim.models.Word2Vec.load(model_path)
+    last_checkpoint = time.time()
+    model = load_model(model_path)
     with open(dist_path, 'rb') as dist:
-        for entry in documents:
+        for idx, entry in enumerate(documents):
+            if idx % 20000 == 0:
+                print("{0} examples classified: {1} s".format(
+                    idx, time.time() - last_checkpoint))
             filtered_entry = list(filter(lambda x: x in model.wv.vocab, entry))
             for inst in zip(pickle.load(dist), entry):
                 if inst[0] == cur_set and inst[1] in filtered_entry:
                     pos = list(filter(lambda x: x is not inst[1], filtered_entry))
                     if pos:
                         eval_model(pos, inst[1], model, found)
+    print("Done evaluating: {0} s".format(time.time() - last_checkpoint))
     return found
 
 def format_results(results):
@@ -130,7 +136,8 @@ def format_results(results):
     return '\n'.join(lines)
 
 def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
-        eval_model, result_path='./results.txt', split_data=False, check=1):
+        load_model, eval_model, result_path='./results.txt', split_data=False,
+        check=1):
     if split_data:
         print('Generating split...')
         split_nway(filepath, dist_path, n)
@@ -143,7 +150,8 @@ def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
     results = []
     for i in range(check):
         results.append(eval_predictions(
-            filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i, eval_model))
+            filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i,
+            load_model, eval_model))
         print('Finished testing model no. %d' % i)
     print('Finished testing models.')
     with open(result_path, 'w+') as res_file:
@@ -177,6 +185,10 @@ def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10
         print('Finished training!\nSaving...')
         model.save(save_path)
 
+    def load_hashtag2vec(model_path):
+        model = gensim.models.Word2Vec.load(model_path)
+        return model
+
     def eval_hashtag2vec(sample, output, model, res): 
         try:
             res[[
@@ -189,6 +201,25 @@ def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10
                         eval_hashtag2vec, result_path=result_path,
                         split_data=split_data, check=check)
 
+def build_vocab(docs):
+    occ = {}
+    for line in docs:
+        for word in line:
+            occ[word] = occ.get(word, 0) + 1
+    vocab = []
+    for kv in occ.items():
+        if kv[1] > 2:
+            vocab.append(kv[0])
+    return vocab
+
+def save_word2vec_format(path, vector_dict):
+    with open(path, 'w') as writer:
+        writer.write("{0} {1}\n".format(len(vector_dict),
+                                        len(next(iter(vector_dict.values())))))
+        for kv in vector_dict.items():
+            writer.write("{0} {1}\n".format(kv[0], ' '.join([str(val) for val in kv[1]])))
+    print("Saved {0}".format(path))
+
 def train_test_universal_encoder(filepath, dist_path, model_path, n,
         result_path='.results.txt', split_data=False, check=1):
     tf.compat.v1.enable_eager_execution()
@@ -196,25 +227,40 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
     ue_model = hub.load(module_url)
 
     def setup_universal_encoder(documents, save_path):
-        model = gensim.models.Word2Vec(documents, size=512, window=100,
-                min_count=3, workers=2, sg=1)
-        print("Model initialized.")
-        for word in model.wv.vocab:
-            model.wv[word] = ue_model([word]).numpy()[0]
-        print("Vectors calculated.")
-        model.save(save_path)
+        last_checkpoint = time.time()
+        vocabulary = build_vocab(documents)
+        print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
+        print("Total words: {0}".format(len(vocabulary)))
+        last_checkpoint = time.time()
+        calculated = ue_model(vocabulary).numpy()
+        vocab_vectors = {}
+        for idx, word in enumerate(vocabulary):
+            vocab_vectors[word] = calculated[idx]
+            if idx % 10000 == 0:
+                print("{0} words done: {1}\nLast word: {2}".format(
+                    idx, time.time() - last_checkpoint, word))
+        print("Vectors calculated: {0} s".format(time.time() - last_checkpoint))
+        last_checkpoint = time.time()
+        save_word2vec_format(save_path, vocab_vectors)
+        print("Model saved: {0} s".format(time.time() - last_checkpoint))
+
+    def load_universal_encoder(model_path):
+        model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
+        return model
 
     def eval_universal_encoder(sample, output, model, res):
         try:
             res[[
-                _[0] for _ in model.wv.similar_by_vector(ue_model([' '.join(sample)]).numpy()[0])
-            ].index(output)] += 1
+                _[0] for _ in model.wv.similar_by_vector(
+                    ue_model([' '.join(sample)]).numpy()[0]
+                )].index(output)] += 1
         except:
             res[10] += 1
 
     train_test_pipeline(filepath, dist_path, model_path, n,
-            setup_universal_encoder, eval_universal_encoder,
-            result_path=result_path, split_data=split_data, check=check)
+            setup_universal_encoder, load_universal_encoder,
+            eval_universal_encoder, result_path=result_path,
+            split_data=split_data, check=check)
 
 def get_hashtags(post_content, model):
     return [i[1:] for i in post_content.split(' ') if
