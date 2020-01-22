@@ -84,17 +84,6 @@ class DocumentIterator:
                     else:
                         yield row[3].split(',')
 
-class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
-    def __init__(self):
-        self.epoch = 0
-
-    def on_epoch_begin(self, model):
-        print("Epoch #{} start".format(self.epoch))
-
-    def on_epoch_end(self, model):
-        print("Epoch #{} end".format(self.epoch))
-        self.epoch += 1
-
 def generate_embeddings(filepath, save_path, train_model, dist_path='',
                         cur_set=-1):
     start_time = time.time()
@@ -110,7 +99,7 @@ def split_nway(filepath, save_path, n=10):
         for entry in documents:
             pickle.dump([random.randint(0, n - 1) for _ in entry], split_file)
 
-def eval_predictions(filepath, dist_path, model_path, cur_set):
+def eval_predictions(filepath, dist_path, model_path, cur_set, eval_model):
     found = [0] * 11
     documents = DocumentIterator(filepath)
     model = gensim.models.Word2Vec.load(model_path)
@@ -121,12 +110,7 @@ def eval_predictions(filepath, dist_path, model_path, cur_set):
                 if inst[0] == cur_set and inst[1] in filtered_entry:
                     pos = list(filter(lambda x: x is not inst[1], filtered_entry))
                     if pos:
-                        try:
-                            found[[
-                                _[0] for _ in model.wv.most_similar(positive=pos)
-                            ].index(inst[1])] += 1
-                        except:
-                            found[10] += 1
+                        eval_model(pos, inst[1], model, found)
     return found
 
 def format_results(results):
@@ -143,7 +127,7 @@ def format_results(results):
     return '\n'.join(lines)
 
 def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
-        result_path='./results.txt', split_data=False, check=1):
+        eval_model, result_path='./results.txt', split_data=False, check=1):
     if split_data:
         print('Generating split...')
         split_nway(filepath, dist_path, n)
@@ -156,7 +140,7 @@ def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
     results = []
     for i in range(check):
         results.append(eval_predictions(
-            filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i))
+            filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i, eval_model))
         print('Finished testing model no. %d' % i)
     print('Finished testing models.')
     with open(result_path, 'w+') as res_file:
@@ -165,6 +149,17 @@ def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
     print(formated_results)
     with open(result_path + 'f', 'w+') as res_file:
         res_file.write(formated_results)
+
+class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
+    def __init__(self):
+        self.epoch = 0
+
+    def on_epoch_begin(self, model):
+        print("Epoch #{} start".format(self.epoch))
+
+    def on_epoch_end(self, model):
+        print("Epoch #{} end".format(self.epoch))
+        self.epoch += 1
 
 def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10,
         result_path='./results.txt', split_data=False, check=1, sg=1):
@@ -179,9 +174,17 @@ def train_test_hashtag2vec(filepath, dist_path, model_path, n, dim=64, epochs=10
         print('Finished training!\nSaving...')
         model.save(save_path)
 
+    def eval_hashtag2vec(sample, output, model, res): 
+        try:
+            res[[
+                _[0] for _ in model.wv.most_similar(positive=sample)
+            ].index(output)] += 1
+        except:
+            res[10] += 1
+
     train_test_pipeline(filepath, dist_path, model_path, n, train_hashtag2vec,
-                        result_path=result_path, split_data=split_data,
-                        check=check)
+                        eval_hashtag2vec, result_path=result_path,
+                        split_data=split_data, check=check)
 
 def get_hashtags(post_content, model):
     return [i[1:] for i in post_content.split(' ') if
