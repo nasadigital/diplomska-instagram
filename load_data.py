@@ -4,6 +4,7 @@ from itertools import accumulate
 import numpy as np
 import pickle
 import random
+from sklearn.neighbors import NearestNeighbors
 import tensorflow as tf
 import tensorflow_hub as hub
 import time
@@ -107,18 +108,26 @@ def eval_predictions(filepath, dist_path, model_path, cur_set, load_model,
     found = [0] * 11
     documents = DocumentIterator(filepath)
     last_checkpoint = time.time()
-    model = load_model(model_path)
+    vocab, model = load_model(model_path)
+    batch_in = []
+    batch_out = []
     with open(dist_path, 'rb') as dist:
         for idx, entry in enumerate(documents):
-            if idx % 20000 == 0:
+            if idx % 50000 == 0:
                 print("{0} examples classified: {1} s".format(
                     idx, time.time() - last_checkpoint))
-            filtered_entry = list(filter(lambda x: x in model.wv.vocab, entry))
+            filtered_entry = list(filter(lambda x: x in vocab, entry))
             for inst in zip(pickle.load(dist), entry):
                 if inst[0] == cur_set and inst[1] in filtered_entry:
                     pos = list(filter(lambda x: x is not inst[1], filtered_entry))
                     if pos:
-                        eval_model(pos, inst[1], model, found)
+                        batch_in.append(pos)
+                        batch_out.append(inst[1])
+                        if idx % 500 == 0:
+                            eval_model(batch_in, batch_out, model, found)
+                            batch_in.clear()
+                            batch_out.clear()
+    eval_model(batch_in, batch_out, model, found)
     print("Done evaluating: {0} s".format(time.time() - last_checkpoint))
     return found
 
@@ -220,6 +229,54 @@ def save_word2vec_format(path, vector_dict):
             writer.write("{0} {1}\n".format(kv[0], ' '.join([str(val) for val in kv[1]])))
     print("Saved {0}".format(path))
 
+def train_test_universal_encoder_balltree(filepath, dist_path, model_path, n,
+        result_path='.results.txt', split_data=False, check=1):
+    tf.compat.v1.enable_eager_execution()
+    module_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
+    ue_model = hub.load(module_url)
+    
+    def setup_universal_encoder(documents, save_path):
+        last_checkpoint = time.time()
+        vocabulary = build_vocab(documents)
+        print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
+        print("Total words: {0}".format(len(vocabulary)))
+        last_checkpoint = time.time()
+        calculated = ue_model(vocabulary).numpy()
+        vocab_vectors = {}
+        for idx, word in enumerate(vocabulary):
+            vocab_vectors[word] = calculated[idx]
+            if idx % 10000 == 0:
+                print("{0} words done: {1}\nLast word: {2}".format(
+                    idx, time.time() - last_checkpoint, word))
+        print("Vectors calculated: {0} s".format(time.time() - last_checkpoint))
+        last_checkpoint = time.time()
+        with open(save_path, 'wb+') as model_file:
+            pickle.dump(vocabulary, model_file)
+            pickle.dump(NearestNeighbors(n_neighbors=10, algorithm='ball_tree')
+                    .fit([vocab_vectors[word] for word in vocabulary]), model_file)
+
+        print("Model saved: {0} s".format(time.time() - last_checkpoint))
+
+    def load_universal_encoder(model_path):
+        with open(model_path, 'rb') as model_file:
+            n_vocab = pickle.load(model_file)
+            n_model = pickle.load(model_file)
+        return (set(n_vocab),
+                ({val : idx for idx, val in enumerate(n_vocab)}, n_model))
+
+    def eval_universal_encoder(sample, output, model, res):
+        try:
+            res[list(model[1].kneighbors(
+                    ue_model([' '.join(sample)]).numpy()
+                )[1][0]).index(model[0].get(output, -1))] += 1
+        except:
+            res[10] += 1
+
+    train_test_pipeline(filepath, dist_path, model_path, n,
+            setup_universal_encoder, load_universal_encoder,
+            eval_universal_encoder, result_path=result_path,
+            split_data=split_data, check=check)
+
 def train_test_universal_encoder(filepath, dist_path, model_path, n,
         result_path='.results.txt', split_data=False, check=1):
     tf.compat.v1.enable_eager_execution()
@@ -246,16 +303,18 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
 
     def load_universal_encoder(model_path):
         model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
-        return model
+        return (set(model.wv.vocab.keys()), model)
 
     def eval_universal_encoder(sample, output, model, res):
-        try:
-            res[[
-                _[0] for _ in model.wv.similar_by_vector(
-                    ue_model([' '.join(sample)]).numpy()[0]
-                )].index(output)] += 1
-        except:
-            res[10] += 1
+        samples = ue_model([' '.join(s) for s in sample]).numpy()
+        for i in range(len(output)):
+            try:
+                res[[
+                    _[0] for _ in model.wv.similar_by_vector(
+                        samples[i]
+                    )].index(output[i])] += 1
+            except:
+                res[10] += 1
 
     train_test_pipeline(filepath, dist_path, model_path, n,
             setup_universal_encoder, load_universal_encoder,
