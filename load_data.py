@@ -157,18 +157,19 @@ def train_test_pipeline(filepath, dist_path, model_path, n, train_model,
         print('Finished training model no. %d' % i)
     print('Finished training all models.\nEvaluating models...')
     results = []
+    fromated_results = ''
     for i in range(check):
         results.append(eval_predictions(
             filepath, dist_path, '%s%03d-%03d.model' % (model_path, i, n), i,
             load_model, eval_model))
+        with open(result_path + 'f', 'w+') as res_file:
+            formated_results = format_results(results)
+            res_file.write(formated_results)
         print('Finished testing model no. %d' % i)
     print('Finished testing models.')
     with open(result_path, 'w+') as res_file:
         res_file.write(str(results))
-    formated_results = format_results(results)
     print(formated_results)
-    with open(result_path + 'f', 'w+') as res_file:
-        res_file.write(formated_results)
 
 class EpochLogger(gensim.models.callbacks.CallbackAny2Vec):
     def __init__(self):
