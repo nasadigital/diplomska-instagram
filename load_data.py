@@ -8,6 +8,8 @@ from sklearn.neighbors import NearestNeighbors
 import tensorflow as tf
 import tensorflow_hub as hub
 import time
+import torch
+import transformers as ppb
 
 class UserLink(object):
     def __init__(self, row):
@@ -123,7 +125,7 @@ def eval_predictions(filepath, dist_path, model_path, cur_set, load_model,
                     if pos:
                         batch_in.append(pos)
                         batch_out.append(inst[1])
-                        if idx % 500 == 0:
+                        if idx % 1000 == 0:
                             eval_model(batch_in, batch_out, model, found)
                             batch_in.clear()
                             batch_out.clear()
@@ -320,6 +322,71 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
     train_test_pipeline(filepath, dist_path, model_path, n,
             setup_universal_encoder, load_universal_encoder,
             eval_universal_encoder, result_path=result_path,
+            split_data=split_data, check=check)
+
+def train_test_bert(filepath, dist_path, model_path, n,
+        result_path='.results.txt', split_data=False, check=1):
+    pretrained_weights = 'distilbert-base-uncased'
+    tokenizer = ppb.DistilBertTokenizer.from_pretrained(pretrained_weights)
+    bert_model = ppb.DistilBertModel.from_pretrained(pretrained_weights)
+
+    def get_bert_features(documents):
+        tokenized = [
+                tokenizer.encode(x, add_special_tokens=True) for x in documents]
+        max_length = len(max(tokenized, key=len))
+        padded = np.array(
+                [i + [0] * (max_length - len(i)) for i in tokenized])
+        attention_mask = np.where(padded != 0, 1, 0)
+        input_ids = torch.tensor(padded)
+        attention_mask = torch.tensor(attention_mask)
+
+        with torch.no_grad():
+            last_hidden_states = bert_model(input_ids, attention_mask=attention_mask)
+        return last_hidden_states[0][:,0,:].numpy()
+
+    def normal_machine_run(docs, st, ed):
+        try:
+            print("Trying range {0}:{1}".format(st, ed))
+            return get_bert_features(docs[st:ed])
+        except RuntimeError:
+            mid = st + (ed - st) // 2
+            return normal_machine_run(docs, st, mid) + normal_machine_run(docs, mid, ed)
+
+    def setup_bert(documents, save_path):
+        last_checkpoint = time.time()
+        vocabulary = build_vocab(documents)
+        print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
+        print("Total words: {0}".format(len(vocabulary)))
+        last_checkpoint = time.time()
+        calculated = normal_machine_run(vocabulary, 0, len(vocabulary))
+        vocab_vectors = {}
+        for idx, word in enumerate(vocabulary):
+            vocab_vectors[word] = calculated[idx]
+            if idx % 10000 == 0:
+                print("{0} words done: {1}\nLast word: {2}".format(
+                    idx, time.time() - last_checkpoint, word))
+        print("Vectors calculated: {0} s".format(time.time() - last_checkpoint))
+        last_checkpoint = time.time()
+        save_word2vec_format(save_path, vocab_vectors)
+        print("Model saved: {0} s".format(time.time() - last_checkpoint))
+
+    def load_bert(model_path):
+        model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
+        return (set(model.wv.vocab.keys()), model)
+
+    def eval_bert(sample, output, model, res):
+        samples = normal_machine_run(sample, 0, len(sample))
+        for i in range(len(output)):
+            try:
+                res[[
+                    _[0] for _ in model.wv.similar_by_vector(
+                        samples[i]
+                    )].index(output[i])] += 1
+            except:
+                res[10] += 1
+
+    train_test_pipeline(filepath, dist_path, model_path, n,
+            setup_bert, load_bert, eval_bert, result_path=result_path,
             split_data=split_data, check=check)
 
 def get_hashtags(post_content, model):
