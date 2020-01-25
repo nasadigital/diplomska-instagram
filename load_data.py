@@ -307,7 +307,7 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
         return (set(model.wv.vocab.keys()), model)
 
     def eval_universal_encoder(sample, output, model, res):
-        samples = ue_model([' '.join(s) for s in sample]).numpy()
+        samples = ue_model([' '.join(s[:6]) for s in sample]).numpy()
         for i in range(len(output)):
             try:
                 res[[
