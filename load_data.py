@@ -324,6 +324,10 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
             eval_universal_encoder, result_path=result_path,
             split_data=split_data, check=check)
 
+def chunks(l, n):
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
 def train_test_bert(filepath, dist_path, model_path, n,
         result_path='.results.txt', split_data=False, check=1):
     pretrained_weights = 'distilbert-base-uncased'
@@ -344,21 +348,17 @@ def train_test_bert(filepath, dist_path, model_path, n,
             last_hidden_states = bert_model(input_ids, attention_mask=attention_mask)
         return last_hidden_states[0][:,0,:].numpy()
 
-    def normal_machine_run(docs, st, ed):
-        try:
-            print("Trying range {0}:{1}".format(st, ed))
-            return get_bert_features(docs[st:ed])
-        except RuntimeError:
-            mid = st + (ed - st) // 2
-            return normal_machine_run(docs, st, mid) + normal_machine_run(docs, mid, ed)
-
     def setup_bert(documents, save_path):
         last_checkpoint = time.time()
         vocabulary = build_vocab(documents)
         print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
         print("Total words: {0}".format(len(vocabulary)))
         last_checkpoint = time.time()
-        calculated = normal_machine_run(vocabulary, 0, len(vocabulary))
+        calculated = []
+        for chunk in chunks(vocabulary, 500):
+            calculated.extend(get_bert_features(chunk))
+            print("{1} words calculated: {0} s"
+                    .format(time.time() - last_checkpoint, len(calculated)))
         vocab_vectors = {}
         for idx, word in enumerate(vocabulary):
             vocab_vectors[word] = calculated[idx]
@@ -375,7 +375,9 @@ def train_test_bert(filepath, dist_path, model_path, n,
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
-        samples = normal_machine_run(sample, 0, len(sample))
+        samples = []
+        for chunk in chunks(sample, 100):
+            samples.extend(get_bert_features(chunk))
         for i in range(len(output)):
             try:
                 res[[
