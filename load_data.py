@@ -125,10 +125,6 @@ def eval_predictions(filepath, dist_path, model_path, cur_set, load_model,
                     if pos:
                         batch_in.append(pos)
                         batch_out.append(inst[1])
-                        if idx % 1000 == 0:
-                            eval_model(batch_in, batch_out, model, found)
-                            batch_in.clear()
-                            batch_out.clear()
     eval_model(batch_in, batch_out, model, found)
     print("Done evaluating: {0} s".format(time.time() - last_checkpoint))
     return found
@@ -328,9 +324,10 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-def train_test_bert(filepath, dist_path, model_path, n,
-        result_path='.results.txt', split_data=False, check=1):
-    pretrained_weights = 'distilbert-base-uncased'
+def prep_train_test_bert(filepath, dist_path, model_path, n,
+        result_path='./results.txt', split_data=False, check=1,
+        pretrained_weights='distilbert-base-uncased'):
+    model_path = './' + pretrained_weights
     tokenizer = ppb.DistilBertTokenizer.from_pretrained(pretrained_weights)
     bert_model = ppb.DistilBertModel.from_pretrained(pretrained_weights)
 
@@ -349,6 +346,9 @@ def train_test_bert(filepath, dist_path, model_path, n,
         return last_hidden_states[0][:,0,:].numpy()
 
     def setup_bert(documents, save_path):
+        in_docs = [doc[1:] for doc in documents if len(doc) > 1]
+        out_docs = [doc[0] for doc in documents if len(doc) > 1]
+        print(len(in_docs))
         last_checkpoint = time.time()
         vocabulary = build_vocab(documents)
         print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
@@ -368,6 +368,15 @@ def train_test_bert(filepath, dist_path, model_path, n,
         print("Vectors calculated: {0} s".format(time.time() - last_checkpoint))
         last_checkpoint = time.time()
         save_word2vec_format(save_path, vocab_vectors)
+        print("Vocabulary saved: {0} s".format(time.time() - last_checkpoint))
+        last_checkpoint = time.time()
+        in_docs_features = []
+        for chunk in chunks(in_docs, 200):
+            in_docs_features.extend(get_bert_features(chunk))
+            print("{1} training samples calculated: {0} s"
+                    .format(time.time() - last_checkpoint, len(in_docs_features)))
+        with open(model_path + '_train.dat', 'wb') as writer:
+            pickle.dump((in_docs_features, out_docs), writer)
         print("Model saved: {0} s".format(time.time() - last_checkpoint))
 
     def load_bert(model_path):
@@ -375,9 +384,37 @@ def train_test_bert(filepath, dist_path, model_path, n,
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
+        last_checkpoint = time.time()
         samples = []
         for chunk in chunks(sample, 100):
             samples.extend(get_bert_features(chunk))
+            print("{1} test samples calculated: {0} s"
+                    .format(time.time() - last_checkpoint, len(samples)))
+        
+        with open(model_path + '_test.dat', 'wb') as writer:
+            pickle.dump((samples, output), writer)
+        res[0] += 1
+
+    train_test_pipeline(filepath, dist_path, model_path, n,
+            setup_bert, load_bert, eval_bert, result_path=result_path,
+            split_data=split_data, check=check)
+
+def train_test_bert(filepath, dist_path, model_path, n,
+        result_path='.results.txt', split_data=False, check=1,
+        pretrained_weights = 'distilbert-base-uncased'):
+    model_path = './' + pretrained_weights
+
+    def setup_bert(documents, save_path):
+        with open(model_path + '_train.dat', 'rb') as reader:
+            in_docs, out_docs = pickle.load(reader)
+
+    def load_bert(model_path):
+        model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
+        return (set(model.wv.vocab.keys()), model)
+
+    def eval_bert(sample, output, model, res):
+        with open(model_path + '_test.dat', 'rb') as reader:
+            samples, output = pickle.load(reader)
         for i in range(len(output)):
             try:
                 res[[
