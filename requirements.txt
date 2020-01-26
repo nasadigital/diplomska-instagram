@@ -1,0 +1,7 @@
+azureml-dataprep
+gensim
+numpy
+tensorflow==1.15
+tensorflow-hub
+transformers
+sklearn

@@ -2,6 +2,7 @@ import csv
 import gensim
 from itertools import accumulate
 import numpy as np
+import os
 import pickle
 import random
 from sklearn.neighbors import NearestNeighbors
@@ -327,7 +328,8 @@ def chunks(l, n):
 def prep_train_test_bert(filepath, dist_path, model_path, n,
         result_path='./results.txt', split_data=False, check=1,
         pretrained_weights='distilbert-base-uncased'):
-    model_path = './' + pretrained_weights
+    model_path = './outputs/' + pretrained_weights
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     tokenizer = ppb.DistilBertTokenizer.from_pretrained(pretrained_weights)
     bert_model = ppb.DistilBertModel.from_pretrained(pretrained_weights)
 
@@ -355,7 +357,7 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         print("Total words: {0}".format(len(vocabulary)))
         last_checkpoint = time.time()
         calculated = []
-        for chunk in chunks(vocabulary, 500):
+        for chunk in chunks(vocabulary, 10000):
             calculated.extend(get_bert_features(chunk))
             print("{1} words calculated: {0} s"
                     .format(time.time() - last_checkpoint, len(calculated)))
@@ -371,7 +373,7 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         print("Vocabulary saved: {0} s".format(time.time() - last_checkpoint))
         last_checkpoint = time.time()
         in_docs_features = []
-        for chunk in chunks(in_docs, 200):
+        for chunk in chunks(in_docs, 2000):
             in_docs_features.extend(get_bert_features(chunk))
             print("{1} training samples calculated: {0} s"
                     .format(time.time() - last_checkpoint, len(in_docs_features)))
@@ -386,11 +388,11 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
     def eval_bert(sample, output, model, res):
         last_checkpoint = time.time()
         samples = []
-        for chunk in chunks(sample, 100):
+        for chunk in chunks(sample, 2000):
             samples.extend(get_bert_features(chunk))
             print("{1} test samples calculated: {0} s"
                     .format(time.time() - last_checkpoint, len(samples)))
-        
+
         with open(model_path + '_test.dat', 'wb') as writer:
             pickle.dump((samples, output), writer)
         res[0] += 1
