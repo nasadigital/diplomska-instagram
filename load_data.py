@@ -334,6 +334,7 @@ def chunks(l, n):
 def prep_train_test_bert(filepath, dist_path, model_path, n,
         result_path='./results.txt', split_data=False, check=1,
         pretrained_weights='distilbert-base-uncased'):
+    batch_size = 3000
     model_path = './outputs/' + pretrained_weights
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     tokenizer = ppb.DistilBertTokenizer.from_pretrained(pretrained_weights)
@@ -357,7 +358,7 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         last_checkpoint = time.time()
         total_calculated_samples = 0
         with open(model_path + extension, 'wb') as writer:
-            for batch in chunks(zip(in_docs, out_docs), 10000):
+            for batch in chunks(zip(in_docs, out_docs), batch_size):
                 sample_features = get_bert_features([' '.join(s[0]) for s in batch])
                 for ctr1 in range(len(batch)):
                     pickle.dump((sample_features[ctr1], batch[ctr1][1]), writer)
