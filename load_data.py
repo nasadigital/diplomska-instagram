@@ -322,8 +322,14 @@ def train_test_universal_encoder(filepath, dist_path, model_path, n,
             split_data=split_data, check=check)
 
 def chunks(l, n):
-    for i in range(0, len(l), n):
-        yield l[i:i + n]
+    rez = []
+    for el in l:
+        rez.append(el)
+        if len(rez) == n:
+            yield rez
+            rez.clear()
+    if rez:
+        yield rez
 
 def prep_train_test_bert(filepath, dist_path, model_path, n,
         result_path='./results.txt', split_data=False, check=1,
@@ -347,10 +353,19 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
             last_hidden_states = bert_model(input_ids, attention_mask=attention_mask)
         return last_hidden_states[0][:,0,:].numpy()
 
+    def write_to_file(in_docs, out_docs, extension):
+        last_checkpoint = time.time()
+        total_calculated_samples = 0
+        with open(model_path + extension, 'wb') as writer:
+            for batch in chunks(zip(in_docs, out_docs), 10000):
+                sample_features = get_bert_features([' '.join(s[0]) for s in batch])
+                for ctr1 in range(len(batch)):
+                    pickle.dump((sample_features[ctr1], batch[ctr1][1]), writer)
+                    total_calculated_samples += 1
+                print("{1} samples calculated: {0} s"
+                        .format(time.time() - last_checkpoint, total_calculated_samples))
+
     def setup_bert(documents, save_path):
-        in_docs = [doc[1:] for doc in documents if len(doc) > 1]
-        out_docs = [doc[0] for doc in documents if len(doc) > 1]
-        print(len(in_docs))
         last_checkpoint = time.time()
         vocabulary = build_vocab(documents)
         print("Vocabulary built: {0} s".format(time.time() - last_checkpoint))
@@ -372,13 +387,10 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         save_word2vec_format(save_path, vocab_vectors)
         print("Vocabulary saved: {0} s".format(time.time() - last_checkpoint))
         last_checkpoint = time.time()
-        in_docs_features = []
-        for chunk in chunks(in_docs, 2000):
-            in_docs_features.extend(get_bert_features(chunk))
-            print("{1} training samples calculated: {0} s"
-                    .format(time.time() - last_checkpoint, len(in_docs_features)))
-        with open(model_path + '_train.dat', 'wb') as writer:
-            pickle.dump((in_docs_features, out_docs), writer)
+        in_docs = [doc[1:] for doc in documents if len(doc) > 1]
+        out_docs = [doc[0] for doc in documents if len(doc) > 1]
+        print("Total samples: {0}".format(len(in_docs)))
+        write_to_file(in_docs, out_docs, '_train.dat')
         print("Model saved: {0} s".format(time.time() - last_checkpoint))
 
     def load_bert(model_path):
@@ -387,14 +399,7 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
 
     def eval_bert(sample, output, model, res):
         last_checkpoint = time.time()
-        samples = []
-        for chunk in chunks(sample, 2000):
-            samples.extend(get_bert_features(chunk))
-            print("{1} test samples calculated: {0} s"
-                    .format(time.time() - last_checkpoint, len(samples)))
-
-        with open(model_path + '_test.dat', 'wb') as writer:
-            pickle.dump((samples, output), writer)
+        write_to_file(sample, output, '_test.dat')
         res[0] += 1
 
     train_test_pipeline(filepath, dist_path, model_path, n,
@@ -404,19 +409,32 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
 def train_test_bert(filepath, dist_path, model_path, n,
         result_path='.results.txt', split_data=False, check=1,
         pretrained_weights = 'distilbert-base-uncased'):
-    model_path = './' + pretrained_weights
+    model_path = './outputs/' + pretrained_weights
+
+    def read_from_file(extension):
+        last_checkpoint = time.time()
+        with open(model_path + extension, 'rb') as reader:
+            try:
+                sample = pickle.load(reader)
+                yield sample
+            except EOFError:
+                return
 
     def setup_bert(documents, save_path):
-        with open(model_path + '_train.dat', 'rb') as reader:
-            in_docs, out_docs = pickle.load(reader)
+        generator = read_from_file('_train.dat')
+        for sample in generator:
+            in_doc, out_doc = sample
 
     def load_bert(model_path):
         model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
-        with open(model_path + '_test.dat', 'rb') as reader:
-            samples, output = pickle.load(reader)
+        generator = read_from_file('_test.dat')
+        samples = []
+        for sample in generator:
+            in_doc, out_doc = sample
+            samples.append(in_doc)
         for i in range(len(output)):
             try:
                 res[[
