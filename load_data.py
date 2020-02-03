@@ -13,6 +13,7 @@ import torch
 import transformers as ppb
 
 from tensorflow.keras import losses, regularizers
+from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import Dense, Activation, Dropout
 from tensorflow.keras.models import Sequential, load_model
 
@@ -456,7 +457,7 @@ def train_test_bert(filepath, dist_path, model_path, n,
 
         INPUT_SIZE = 768
         INITIALIZER = 'he_normal'
-        REGULARIZER = regularizers.l1_l2(l1=0.0001, l2=0.0001)
+        REGULARIZER = regularizers.l1_l2(l1=0.01, l2=0.01)
 
         keras_model = Sequential()
         keras_model.add(Dense(INPUT_SIZE, input_dim=INPUT_SIZE))
@@ -470,12 +471,14 @@ def train_test_bert(filepath, dist_path, model_path, n,
         keras_model.compile('adadelta', loss=losses.CosineSimilarity(axis=1),
                 metrics=['cosine_proximity'])
 
-        keras_model.fit(in_docs, out_docs, batch_size=2000, epochs=5,
-                validation_split=0.2)
+        callback = EarlyStopping(patience=3)
+        keras_model.fit(in_docs, out_docs, batch_size=4000, epochs=500,
+                validation_split=0.2, callbacks=[callback])
         keras_model.save(model_path + ".h5")
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
+        last_checkpoint = time.time()
         generator = read_from_file('_test.dat')
         samples = []
         for sample in generator:
@@ -483,6 +486,8 @@ def train_test_bert(filepath, dist_path, model_path, n,
             samples.append(in_doc)
         keras_model = load_model(model_path + ".h5")
         predicted_vectors = keras_model.predict(np.array(samples))
+        print("Done predicting: {0} s".format(time.time() - last_checkpoint))
+        last_checkpoint = time.time()
         for i in range(len(output)):
             try:
                 res[[
@@ -491,6 +496,9 @@ def train_test_bert(filepath, dist_path, model_path, n,
                     )].index(output[i])] += 1
             except:
                 res[10] += 1
+            if i % 10000 == 0:
+                print("{0} samples have nearest neighbours: {1}".format(i, 
+                        time.time() - last_checkpoint))
 
     train_test_pipeline(filepath, dist_path, model_path, n,
             setup_bert, load_bert, eval_bert, result_path=result_path,

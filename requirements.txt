@@ -1,8 +1,7 @@
 azureml-dataprep
 gensim
 numpy
-keras
-tensorflow==2.1.0
 tensorflow-hub
 transformers
+torch
 sklearn
