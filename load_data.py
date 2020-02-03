@@ -12,6 +12,10 @@ import time
 import torch
 import transformers as ppb
 
+from tensorflow.keras import losses, regularizers
+from tensorflow.keras.layers import Dense, Activation, Dropout
+from tensorflow.keras.models import Sequential, load_model
+
 class UserLink(object):
     def __init__(self, row):
         self.to = int(row[1])
@@ -344,12 +348,14 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         tokenized = [
                 tokenizer.encode(x, add_special_tokens=True) for x in documents]
         max_length = len(max(tokenized, key=len))
+        print("Max depth for the current batch is: {0}".format(max_length))
         padded = np.array(
                 [i + [0] * (max_length - len(i)) for i in tokenized])
         attention_mask = np.where(padded != 0, 1, 0)
         input_ids = torch.tensor(padded)
         attention_mask = torch.tensor(attention_mask)
 
+        print("Pytorch uses GPU: {0}".format(torch.cuda.is_available()))
         with torch.no_grad():
             last_hidden_states = bert_model(input_ids, attention_mask=attention_mask)
         return last_hidden_states[0][:,0,:].numpy()
@@ -399,13 +405,18 @@ def prep_train_test_bert(filepath, dist_path, model_path, n,
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
-        last_checkpoint = time.time()
         write_to_file(sample, output, '_test.dat')
         res[0] += 1
 
     train_test_pipeline(filepath, dist_path, model_path, n,
             setup_bert, load_bert, eval_bert, result_path=result_path,
             split_data=split_data, check=check)
+
+def shuffle_samples(in_docs, out_docs):
+    indices = np.arange(in_docs.shape[0])
+    np.random.shuffle(indices)
+    in_docs = in_docs[indices]
+    out_docs = out_docs[indices]
 
 def train_test_bert(filepath, dist_path, model_path, n,
         result_path='.results.txt', split_data=False, check=1,
@@ -415,19 +426,53 @@ def train_test_bert(filepath, dist_path, model_path, n,
     def read_from_file(extension):
         last_checkpoint = time.time()
         with open(model_path + extension, 'rb') as reader:
-            try:
-                sample = pickle.load(reader)
-                yield sample
-            except EOFError:
-                return
+            while True:
+                try:
+                    sample = pickle.load(reader)
+                    yield sample
+                except EOFError:
+                    break
 
     def setup_bert(documents, save_path):
         generator = read_from_file('_train.dat')
+        in_docs = []
+        out_docs = []
         for sample in generator:
             in_doc, out_doc = sample
 
-    def load_bert(model_path):
-        model = gensim.models.KeyedVectors.load_word2vec_format(model_path)
+    def load_bert(word2vec_path):
+        print("Tensorflow uses GPU: {0}".format(
+            tf.test.is_gpu_available(cuda_only=True)))
+        model = gensim.models.KeyedVectors.load_word2vec_format(word2vec_path)
+        generator = read_from_file('_train.dat')
+        in_docs = []
+        out_docs = []
+        for sample in generator:
+            if sample[1] in model.wv:
+                in_docs.append(sample[0])
+                out_docs.append(model.wv[sample[1]])
+        in_docs, out_docs = np.array(in_docs), np.array(out_docs)
+        shuffle_samples(in_docs, out_docs)
+
+        INPUT_SIZE = 768
+        INITIALIZER = 'he_normal'
+        REGULARIZER = regularizers.l1_l2(l1=0.0001, l2=0.0001)
+
+        keras_model = Sequential()
+        keras_model.add(Dense(INPUT_SIZE, input_dim=INPUT_SIZE))
+        keras_model.add(Dropout(0.05))
+        keras_model.add(Dense(INPUT_SIZE, kernel_initializer=INITIALIZER,
+                              kernel_regularizer=REGULARIZER, activation='relu'))
+        keras_model.add(Dropout(0.05))
+        keras_model.add(Dense(INPUT_SIZE, kernel_initializer=INITIALIZER,
+                              kernel_regularizer=REGULARIZER, activation='linear'))
+
+        keras_model.compile('adadelta', loss=losses.CosineSimilarity(axis=1),
+                metrics=['cosine_proximity'])
+
+        keras_model.fit(in_docs, out_docs, batch_size=2000, epochs=5,
+                validation_split=0.2)
+        keras_model.save(model_path + ".h5")
         return (set(model.wv.vocab.keys()), model)
 
     def eval_bert(sample, output, model, res):
@@ -436,11 +481,13 @@ def train_test_bert(filepath, dist_path, model_path, n,
         for sample in generator:
             in_doc, out_doc = sample
             samples.append(in_doc)
+        keras_model = load_model(model_path + ".h5")
+        predicted_vectors = keras_model.predict(np.array(samples))
         for i in range(len(output)):
             try:
                 res[[
                     _[0] for _ in model.wv.similar_by_vector(
-                        samples[i]
+                        predicted_vectors[i]
                     )].index(output[i])] += 1
             except:
                 res[10] += 1
